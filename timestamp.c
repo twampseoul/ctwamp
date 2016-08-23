@@ -21,9 +21,16 @@ float jitter = 0.0;
 float jitter_up = 0.0;
 float jitter_dw = 0.0;
 uint16_t number_of_packets = 0;
-uint16_t prev_difference = 0;
+uint64_t prev_difference = 0;
+
 uint16_t prev_difference_up = 0;
 uint16_t prev_difference_dw = 0;
+
+uint64_t prev_send_time = 0;
+uint64_t prev_receive_time = 0;
+uint64_t prev_reflect_time = 0;
+uint64_t prev_recv_resp_time = 0;
+
 uint64_t total_time_diiference = 0;
 
 void timeval_to_timestamp(const struct timeval *tv, TWAMPTimestamp *ts)
@@ -115,40 +122,40 @@ static float get_jitter(uint64_t time_difference){
     if (diff < 0){
         diff = -1 * diff;
     }
+
     jitter = jitter + ((diff - jitter)/16);
     prev_difference = time_difference;
     return jitter;
 }
 
-static float get_jitter_up(uint64_t time_difference){
+static float get_jitter_up(uint64_t rec_time, uint64_t prev_rec_time, uint64_t sen_time, uint64_t prev_sen_time){
 
     // This calculation based on the RFC3550 page 40
     // https://tools.ietf.org/rfcmarkup?rfc=3550&draft=&url=#section-6.4.1
     // D(i,j) = (Rj - Ri) - (Sj - Si) = (Rj - Sj) - (Ri - Si)
     // J(i) = J(i-1) + (|D(i-1,i)| - J(i-1))/16
 
-    int diff = time_difference - prev_difference_up;
+    int diff = (rec_time - prev_rec_time) - (sen_time - prev_sen_time);
     if (diff < 0){
         diff = -1 * diff;
     }
     jitter_up = jitter_up + ((diff - jitter_up)/16);
-    prev_difference_up = time_difference;
     return jitter_up;
 }
 
-static float get_jitter_dw(uint64_t time_difference){
+static float get_jitter_dw(uint64_t resp_time, uint64_t prev_resp_time, uint64_t ref_time, uint64_t prev_ref_time){
 
     // This calculation based on the RFC3550 page 40
     // https://tools.ietf.org/rfcmarkup?rfc=3550&draft=&url=#section-6.4.1
     // D(i,j) = (Rj - Ri) - (Sj - Si) = (Rj - Sj) - (Ri - Si)
     // J(i) = J(i-1) + (|D(i-1,i)| - J(i-1))/16
 
-    int diff = time_difference - prev_difference_dw;
+    int diff = (resp_time - prev_resp_time) - (ref_time - prev_ref_time);
     if (diff < 0){
         diff = -1 * diff;
     }
     jitter_dw = jitter_dw + ((diff - jitter_dw)/16);
-    prev_difference_dw = time_difference;
+    //prev_difference_dw = time_difference;
     return jitter_dw;
 }
 
@@ -162,22 +169,22 @@ void print_metrics(uint32_t j, uint16_t port, const ReflectorUPacket *pack) {
     /* Get Time of the received TWAMP-Test response message */
     TWAMPTimestamp recv_resp_time = get_timestamp();
 
-    uint16_t remote_processing_time = get_time_difference(&pack->time, &pack->receive_time);
+    uint64_t remote_processing_time = get_time_difference(&pack->time, &pack->receive_time);
 
     /* Print different metrics */
 
     /* Compute round-trip */
-    fprintf(stderr, "Round-trip time for TWAMP-Test packet %d for port %hd is %" PRIu64 " [usec]\n",
+    fprintf(stderr, "RTT for TWAMP-Test packet %d for port %hd is %" PRIu64 " [usec]\n",
             j, port, get_time_difference(&recv_resp_time, &pack->sender_time) - remote_processing_time);
-    fprintf(stderr, "Receive time - Send time for TWAMP-Test"
-            " packet %d for port %d is %" PRIu64 " [usec]\n", j, port,
-            get_time_difference(&pack->receive_time, &pack->sender_time));
-    fprintf(stderr, "Reflect time - Send time for TWAMP-Test"
-                    " packet %d for port %d is %" PRIu64 " [usec]\n", j, port,
-            get_time_difference(&pack->time, &pack->sender_time));
-    fprintf(stderr, "Now time - Reflect time for TWAMP-Test"
-                    " packet %d for port %d is %" PRIu64 " [usec]\n", j, port,
-            get_time_difference(&recv_resp_time, &pack->time));
+    //fprintf(stderr, "Receive time - Send time for TWAMP-Test"
+    //        " packet %d for port %d is %" PRIu64 " [usec]\n", j, port,
+    //        get_time_difference(&pack->receive_time, &pack->sender_time));
+    //fprintf(stderr, "Reflect time - Send time for TWAMP-Test"
+    //                " packet %d for port %d is %" PRIu64 " [usec]\n", j, port,
+    //        get_time_difference(&pack->time, &pack->sender_time));
+    //fprintf(stderr, "Now time - Reflect time for TWAMP-Test"
+    //                " packet %d for port %d is %" PRIu64 " [usec]\n", j, port,
+    //        get_time_difference(&recv_resp_time, &pack->time));
     fprintf(stderr, "Remote processing time %" PRIu64 " [usec]\n",
             remote_processing_time);
 
@@ -186,13 +193,19 @@ void print_metrics(uint32_t j, uint16_t port, const ReflectorUPacket *pack) {
 
     if (number_of_packets == 1){
         prev_difference = get_time_difference(&recv_resp_time, &pack->sender_time) - remote_processing_time;
-        prev_difference_dw = get_time_difference(&recv_resp_time, &pack->time);
-        prev_difference_up = get_time_difference(&pack->receive_time, &pack->sender_time);
+        //prev_difference_dw = get_time_difference(&recv_resp_time, &pack->time);
+        //prev_difference_up = get_time_difference(&pack->receive_time, &pack->sender_time);
     } else {
         fprintf(stderr, "Jitter rtt: %f usec \n", get_jitter(get_time_difference(&recv_resp_time, &pack->sender_time) - remote_processing_time));
-        fprintf(stderr, "Jitter dw: %f usec \n", get_jitter_dw(get_time_difference(&recv_resp_time, &pack->time)));
-        fprintf(stderr, "Jitter up: %f usec \n", get_jitter_up(get_time_difference(&pack->receive_time, &pack->sender_time)));
+        //fprintf(stderr, "Jitter dw: %f usec \n", get_jitter_dw(get_time_difference(&recv_resp_time, &pack->time)));
+        fprintf(stderr, "Jitter up: %f usec \n", get_jitter_up(get_usec(&pack->receive_time), prev_receive_time, get_usec(&pack->sender_time), prev_send_time));
+        fprintf(stderr, "Jitter dw: %f usec \n", get_jitter_dw(get_usec(&recv_resp_time), prev_recv_resp_time, get_usec(&pack->time), prev_reflect_time));
     }
 
     fprintf(stderr, "Average RTT : %" PRIu64 " usec \n", get_average_rtt(get_time_difference(&recv_resp_time, &pack->sender_time)));
+
+    prev_send_time = get_usec(&pack->sender_time);
+    prev_receive_time = get_usec(&pack->receive_time);
+    prev_reflect_time = get_usec(&pack->time);
+    prev_recv_resp_time = get_usec(&recv_resp_time);
 }
