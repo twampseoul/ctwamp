@@ -27,7 +27,7 @@
 #define PORTBASE_RECV    20000
 #define TEST_SESSIONS    1
 #define TEST_MESSAGES    1
-#define TIMEOUT          2 /* SECONDS */
+#define TIMEOUT          1 /* SECONDS */
 
 struct twamp_test_info {
     int testfd;
@@ -349,6 +349,7 @@ int main(int argc, char *argv[])
      * TWAMP-Test packets */
     for (i = 0; i < active_sessions; i++) {
         uint32_t j;
+        uint32_t success = 0;
         for (j = 0; j < test_sessions_msg; j++) {
             SenderUPacket pack;
             memset(&pack, 0, sizeof(pack));
@@ -356,7 +357,7 @@ int main(int argc, char *argv[])
             pack.time = get_timestamp();
             pack.error_estimate = 0x100;    // Multiplier = 1.
 
-            printf("Sending TWAMP-Test message %d for port %d...\n", j + 1, ntohs(twamp_test[i].port));
+            printf("\nSending TWAMP-Test message %d for port %d...\n", j + 1, ntohs(twamp_test[i].port));
             serv_addr.sin_port = twamp_test[i].port;
             rv = sendto(twamp_test[i].testfd, &pack, sizeof(pack), 0,
                         (struct sockaddr *)&serv_addr, sizeof(serv_addr));
@@ -368,12 +369,23 @@ int main(int argc, char *argv[])
             socklen_t len = sizeof(serv_addr);
             ReflectorUPacket pack_reflect;
             memset(&pack_reflect, 0, sizeof(pack_reflect));
+            
+            struct timeval tv;
+			tv.tv_sec = 1;
+			tv.tv_usec = 0;
+			if (setsockopt(twamp_test[i].testfd, SOL_SOCKET, SO_RCVTIMEO,&tv,sizeof(tv)) < 0) {
+				perror("Error");
+			}
+            
+            printf("Before receiving\n");
             rv = recvfrom(twamp_test[i].testfd, &pack_reflect, sizeof(pack_reflect), 0,
                           (struct sockaddr *)&serv_addr, &len);
+            printf("After receiving\n");
             if (rv <= 0) {
                 perror("Error receiving test reply");
                 continue;
             }
+            success++;
             printf("Received TWAMP-Test message response %d for port %d.\n", j + 1, ntohs(twamp_test[i].port));
             /* Print the round-trip metrics */
             print_metrics(j + 1, ntohs(twamp_test[i].port), &pack_reflect);
