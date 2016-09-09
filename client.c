@@ -390,6 +390,8 @@ int main(int argc, char *argv[])
             /* Print the round-trip metrics */
             print_metrics(j + 1, ntohs(twamp_test[i].port), &pack_reflect);
         }
+        double packetLoss = 100.0f * (test_sessions_msg - success) / test_sessions_msg;
+        printf("Packet loss: %f percent\n", packetLoss);
     }
 
     /* After all TWAMP-Test packets were sent, send a StopSessions
